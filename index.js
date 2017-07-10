@@ -42,6 +42,8 @@ var getProperty = function(config, propName, defaultValue) {
  * Sparkplug Client
  */
 function SparkplugClient(config) {
+    if(config.logLevel)
+        logger.level = config.logLevel;
     var versionA = "spAv1.0",
         versionB = "spBv1.0",
         serverUrl = getRequiredProperty(config, "serverUrl"),
