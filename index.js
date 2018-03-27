@@ -256,6 +256,27 @@ function SparkplugClient(config) {
           payload, options);
     };
 
+    // Publishes Node Data messages for the edge node
+    this.publishNodeCommand = function(request) {
+        function requireField(fieldName, message) {
+            if(!request[fieldName])
+                throw new Error("request." + fieldName + " must be a non empty string");
+          return request[fieldName];
+        }
+        var groupId = requireField('groupId');
+        var nodeId = requireField('nodeId');
+        var timestamp = request.timestamp || Date.now()
+        var metrics = request.metrics
+        if(!metrics || !Array.isArray(metrics)) {
+            throw new Error("request.metrics must be an array of SparkPlug metrics with the structure [{name: string, value: number | string, type: string}]");
+        }
+        logger.info("Publishing NCMD");
+        var topic = version + "/" + groupId + "/NCMD/" + nodeId;
+        var payload = {timestamp: timestamp, metrics: metrics}
+        client.publish(topic, encodePayload(maybeCompressPayload(payload, {})));
+        messageAlert("published", topic, payload);
+    };
+
     // Publishes Node BIRTH certificates for the edge node
     this.publishDeviceData = function(deviceId, payload, options) {
         logger.info("Publishing DDATA for device " + deviceId);
