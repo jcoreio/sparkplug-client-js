@@ -59,6 +59,8 @@ function SparkplugClient(config) {
         // for application nodes
         groupId = isApplication ? getProperty(config, "groupId") : getRequiredProperty(config, "groupId"),
         edgeNode = isApplication ? getProperty(config, "edgeNode") : getRequiredProperty(config, "edgeNode"),
+        appName = getProperty(config, "appName") || 'APP',
+        appStateTopic = "STATE/" + appName,
 
         publishDeath = getProperty(config, "publishDeath", false),
         version = getProperty(config, "version", versionB),
@@ -310,22 +312,27 @@ function SparkplugClient(config) {
     // Configures and connects the client
     return (function(sparkplugClient) {
         // Client connection options
-        var clientOptions = {
-            "clientId" : clientId,
-            "clean" : true,
-            "keepalive" : 30,
-            "connectionTimeout" : 30,
-            "username" : username,
-            "password" : password
+        var willMessage = isApplication ? {
+            topic: appStateTopic,
+            payload: 'OFFLINE',
+            qos: 1,
+            retain: true
+        } : {
+          topic: version + "/" + groupId + "/NDEATH/" + edgeNode,
+          payload: encodePayload(getDeathPayload()),
+          qos: 0,
+          retain: false
         };
-        if(!isApplication) {
-            clientOptions.will = {
-              "topic" : version + "/" + groupId + "/NDEATH/" + edgeNode,
-              "payload" : encodePayload(getDeathPayload()),
-              "qos" : 0,
-              "retain" : false
-            }
-        }
+
+        var clientOptions = {
+            clientId: clientId,
+            clean: true,
+            keepalive: 30,
+            connectionTimeout: 30,
+            username: username,
+            password: password,
+            will: willMessage
+        };
 
         // Connect to the MQTT server
         sparkplugClient.connecting = true;
@@ -344,6 +351,7 @@ function SparkplugClient(config) {
             sparkplugClient.emit("connect");
 
             if(isApplication) {
+                client.publish(appStateTopic, 'ONLINE', {qos: 1, retain: true})
                 var messagesFromDevices = ["NBIRTH", "NDEATH", "DBIRTH", "DDEATH", "NDATA", "DDATA"]
                 messagesFromDevices.forEach(function(messageType) {
                     //         wildcards for: groupId              edgeNode
@@ -354,6 +362,7 @@ function SparkplugClient(config) {
               logger.info("Subscribing to control/command messages for both the edge node and the attached devices");
               client.subscribe(version + "/" + groupId + "/NCMD/" + edgeNode + "/#", { "qos" : 0 });
               client.subscribe(version + "/" + groupId + "/DCMD/" + edgeNode + "/#", { "qos" : 0 });
+              client.subscribe("STATE/+", {qos: 1});
               // Emit the "birth" event to notify the application to send a births
               sparkplugClient.emit("birth");
             }
@@ -390,26 +399,39 @@ function SparkplugClient(config) {
          * 'message' handler
          */
         client.on('message', function (topic, message) {
+          // Split the topic up into tokens
+          var splitTopic = topic.split("/");
+          var splitTopicBegin = splitTopic.slice(0, 4)
+          if ("STATE" === splitTopic[0]) {
+            var host = splitTopic[1]
+            if (host) {
+                var status = message.toString()
+                switch (status) {
+                  case "ONLINE": sparkplugClient.emit("scadaHostOnline", host); break;
+                  case "OFFLINE": sparkplugClient.emit("scadaHostOffline", host); break;
+                  default: logger.error("Got unrecognized STATE payload: " + status);
+                }
+            } else {
+                logger.error("Got STATE message with no host")
+            }
+          } else {
             var payload = maybeDecompressPayload(decodePayload(message));
             messageAlert("arrived", topic, payload);
-
-            // Split the topic up into tokens
-            var splitTopic = topic.split("/");
-            var splitTopicBegin = splitTopic.slice(0, 4)
             if(isApplication) {
-                try {
-                  if(splitTopic.length < 4) throw new Error("unexpected topic: " + topic)
-                  if(version !== splitTopic[0]) throw new Error("unexpected version: " + splitTopic[0])
-                  sparkplugClient.emit("appMessage", {
-                    messageType: splitTopic[2],
-                    groupId: splitTopic[1],
-                    edgeNode: splitTopic[3],
-                    payload: payload
-                  })
-                } catch (err) {
-                    logger.error("Application got unexpected message: " + err.message)
-                }
+              try {
+                if(splitTopic.length < 4) throw new Error("unexpected topic: " + topic)
+                if(version !== splitTopic[0]) throw new Error("unexpected version: " + splitTopic[0])
+                sparkplugClient.emit("appMessage", {
+                  messageType: splitTopic[2],
+                  groupId: splitTopic[1],
+                  edgeNode: splitTopic[3],
+                  payload: payload
+                })
+              } catch (err) {
+                logger.error("Application got unexpected message: " + err.message)
+              }
             } else { // Device node
+
               if (_.isEqual([version, groupId, "NCMD", edgeNode], splitTopicBegin)) {
                 // Emit the "command" event
                 sparkplugClient.emit("ncmd", payload);
@@ -420,6 +442,7 @@ function SparkplugClient(config) {
                 logger.info("Message received on unknown topic " + topic);
               }
             }
+          }
         });
 
         return sparkplugClient;
