@@ -16,12 +16,12 @@ var mqtt = require('mqtt'),
     events = require('events'),
     util = require("util"),
     pako = require('pako'),
-    logger = require('winston'),
+    logger = require('log4jcore'),
     _ = require('lodash');
 
 var compressed = "SPBV1.0_COMPRESSED";
 
-logger.level = 'debug';
+var log = logger('SparkPlugClient');
 
 var getRequiredProperty = function(config, propName) {
     if (config[propName] !== undefined) {
@@ -42,8 +42,6 @@ var getProperty = function(config, propName, defaultValue) {
  * Sparkplug Client
  */
 function SparkplugClient(config) {
-    if(config.logLevel)
-        logger.level = config.logLevel;
     var versionA = "spAv1.0",
         versionB = "spBv1.0",
         serverUrl = getRequiredProperty(config, "serverUrl"),
@@ -128,7 +126,7 @@ function SparkplugClient(config) {
         var payload, topic;
 
         // Publish DEATH certificate for edge node
-        logger.info("Publishing Edge Node Death");
+        log.debug("Publishing Edge Node Death");
         payload = getDeathPayload();
         topic = version + "/" + groupId + "/NDEATH/" + edgeNode;
         client.publish(topic, encodePayload(payload));
@@ -137,9 +135,9 @@ function SparkplugClient(config) {
 
     // Logs a message alert to the console
     messageAlert = function(alert, topic, payload) {
-        logger.debug("Message " + alert);
-        logger.debug(" topic: " + topic);
-        logger.debug(" payload: " + JSON.stringify(payload));
+        log.debug("Message " + alert);
+        log.debug(" topic: " + topic);
+        log.debug(" payload: " + JSON.stringify(payload));
     },
 
     compressPayload = function(payload, options) {
@@ -149,23 +147,21 @@ function SparkplugClient(config) {
                 "uuid" : compressed
             };
 
-        logger.debug("Compressing payload " + JSON.stringify(options));
+        log.debug("Compressing payload " + JSON.stringify(options));
 
         // See if any options have been set
         if (options !== undefined && options !== null) {
-                logger.info("test: " + options.algorithm);
             // Check algorithm
             if (options['algorithm']) {
-                logger.info("test");
                 algorithm = options['algorithm'];
             }
         }
 
         if (algorithm === null || algorithm.toUpperCase() === "DEFLATE") {
-            logger.debug("Compressing with DEFLATE!");
+            log.debug("Compressing with DEFLATE!");
             resultPayload.body = pako.deflate(payload);
         } else if (algorithm.toUpperCase() === "GZIP") {
-            logger.debug("Compressing with GZIP");
+            log.debug("Compressing with GZIP");
             resultPayload.body = pako.gzip(payload);
         } else {
             throw new Error("Unknown or unsupported algorithm " + algorithm);
@@ -187,7 +183,7 @@ function SparkplugClient(config) {
         var metrics = payload.metrics,
             algorithm = null;
 
-        logger.debug("Decompressing payload");
+        log.debug("Decompressing payload");
 
         if (metrics !== undefined && metrics !== null) {
             for (var i = 0; i < metrics.length; i++) {
@@ -198,10 +194,10 @@ function SparkplugClient(config) {
         }
 
         if (algorithm === null || algorithm.toUpperCase() === "DEFLATE") {
-            logger.debug("Decompressing with DEFLATE!");
+            log.debug("Decompressing with DEFLATE!");
             return pako.inflate(payload.body);
         } else if (algorithm.toUpperCase() === "GZIP") {
-            logger.debug("Decompressing with GZIP");
+            log.debug("Decompressing with GZIP");
             return pako.ungzip(payload.body);
         } else {
             throw new Error("Unknown or unsupported algorithm " + algorithm);
@@ -239,7 +235,7 @@ function SparkplugClient(config) {
         }
 
         // Publish BIRTH certificate for edge node
-        logger.info("Publishing Edge Node Birth");
+        log.debug("Publishing Edge Node Birth");
         var p = maybeCompressPayload(payload, options);
         client.publish(topic, encodePayload(p));
         messageAlert("published", topic, p);
@@ -253,7 +249,7 @@ function SparkplugClient(config) {
 
     // Publishes Node Data messages for the edge node
     this.publishNodeData = function(payload, options) {
-        logger.info("Publishing NDATA");
+        log.debug("Publishing NDATA");
         publishWithSeq(version + "/" + groupId + "/NDATA/" + edgeNode,
           payload, options);
     };
@@ -272,7 +268,7 @@ function SparkplugClient(config) {
         if(!metrics || !Array.isArray(metrics)) {
             throw new Error("request.metrics must be an array of SparkPlug metrics with the structure [{name: string, value: number | string, type: string}]");
         }
-        logger.info("Publishing NCMD");
+        log.debug("Publishing NCMD");
         var topic = version + "/" + groupId + "/NCMD/" + nodeId;
         var payload = {timestamp: timestamp, metrics: metrics}
         client.publish(topic, encodePayload(maybeCompressPayload(payload, {})));
@@ -281,27 +277,27 @@ function SparkplugClient(config) {
 
     // Publishes Node BIRTH certificates for the edge node
     this.publishDeviceData = function(deviceId, payload, options) {
-        logger.info("Publishing DDATA for device " + deviceId);
+        log.debug("Publishing DDATA for device " + deviceId);
         publishWithSeq(version + "/" + groupId + "/DDATA/" + edgeNode + "/" + deviceId,
             payload, options);
     };
 
     // Publishes Node BIRTH certificates for the edge node
     this.publishDeviceBirth = function(deviceId, payload, options) {
-        logger.info("Publishing DBIRTH for device " + deviceId);
+        log.debug("Publishing DBIRTH for device " + deviceId);
         publishWithSeq(version + "/" + groupId + "/DBIRTH/" + edgeNode + "/" + deviceId,
             payload, options);
     };
 
     // Publishes Node BIRTH certificates for the edge node
     this.publishDeviceDeath = function(deviceId, payload) {
-        logger.info("Publishing DDEATH for device " + deviceId);
+        log.debug("Publishing DDEATH for device " + deviceId);
         publishWithSeq(version + "/" + groupId + "/DDEATH/" + edgeNode + "/" + deviceId,
             payload, options);
     };
 
     this.stop = function() {
-        logger.debug("publishDeath: " + publishDeath);
+        log.debug("publishDeath: " + publishDeath);
         if (publishDeath) {
             // Publish the DEATH certificate
             publishNDeath(client);
@@ -336,16 +332,16 @@ function SparkplugClient(config) {
 
         // Connect to the MQTT server
         sparkplugClient.connecting = true;
-        logger.debug("Attempting to connect: " + serverUrl);
-        logger.debug("              options: " + JSON.stringify(clientOptions));
+        log.debug("Attempting to connect: " + serverUrl);
+        log.debug("              options: " + JSON.stringify(clientOptions));
         client = mqtt.connect(serverUrl, clientOptions);
-        logger.debug("Finished attempting to connect");
+        log.debug("Finished attempting to connect");
 
         /*
          * 'connect' handler
          */
         client.on('connect', function () {
-            logger.info("Client has connected");
+            log.debug("Client has connected");
             sparkplugClient.connecting = false;
             sparkplugClient.connected = true;
             sparkplugClient.emit("connect");
@@ -359,7 +355,7 @@ function SparkplugClient(config) {
                 })
             } else {
               // Subscribe to control/command messages for both the edge node and the attached devices
-              logger.info("Subscribing to control/command messages for both the edge node and the attached devices");
+              log.debug("Subscribing to control/command messages for both the edge node and the attached devices");
               client.subscribe(version + "/" + groupId + "/NCMD/" + edgeNode + "/#", { "qos" : 0 });
               client.subscribe(version + "/" + groupId + "/DCMD/" + edgeNode + "/#", { "qos" : 0 });
               client.subscribe("STATE/+", {qos: 1});
@@ -409,10 +405,10 @@ function SparkplugClient(config) {
                 switch (status) {
                   case "ONLINE": sparkplugClient.emit("scadaHostOnline", host); break;
                   case "OFFLINE": sparkplugClient.emit("scadaHostOffline", host); break;
-                  default: logger.error("Got unrecognized STATE payload: " + status);
+                  default: log.error("Got unrecognized STATE payload: " + status);
                 }
             } else {
-                logger.error("Got STATE message with no host")
+                log.error("Got STATE message with no host")
             }
           } else {
             var payload = maybeDecompressPayload(decodePayload(message));
@@ -428,7 +424,7 @@ function SparkplugClient(config) {
                   payload: payload
                 })
               } catch (err) {
-                logger.error("Application got unexpected message: " + err.message)
+                log.error("Application got unexpected message: " + err.message)
               }
             } else { // Device node
 
@@ -439,7 +435,7 @@ function SparkplugClient(config) {
                 // Emit the "command" event for the given deviceId
                 sparkplugClient.emit("dcmd", splitTopic[4], payload);
               } else {
-                logger.info("Message received on unknown topic " + topic);
+                log.error("Message received on unknown topic " + topic);
               }
             }
           }
